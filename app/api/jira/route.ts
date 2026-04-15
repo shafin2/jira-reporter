@@ -1,33 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-function getDateRange(timeline: string): { from: string; label: string } {
+function getDateRange(timeline: string, customFrom?: string, customTo?: string): { from: string; to: string; label: string } {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
 
   switch (timeline) {
     case 'today':
-      return { from: fmt(now), label: 'Today' };
+      return { from: fmt(now), to: fmt(tomorrow), label: 'Today' };
     case '2days': {
       const d = new Date(now); d.setDate(d.getDate() - 1);
-      return { from: fmt(d), label: 'Last 2 days' };
+      return { from: fmt(d), to: fmt(tomorrow), label: 'Last 2 days' };
     }
     case '3days': {
       const d = new Date(now); d.setDate(d.getDate() - 2);
-      return { from: fmt(d), label: 'Last 3 days' };
+      return { from: fmt(d), to: fmt(tomorrow), label: 'Last 3 days' };
     }
     case 'week': {
       const d = new Date(now); d.setDate(d.getDate() - 6);
-      return { from: fmt(d), label: 'This week' };
+      return { from: fmt(d), to: fmt(tomorrow), label: 'This week' };
+    }
+    case 'custom': {
+      // customTo is inclusive so push to the next day
+      const to = new Date(customTo!); to.setDate(to.getDate() + 1);
+      return { from: customFrom!, to: fmt(to), label: `${customFrom} → ${customTo}` };
     }
     default:
-      return { from: fmt(now), label: 'Today' };
+      return { from: fmt(now), to: fmt(tomorrow), label: 'Today' };
   }
 }
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { siteUrl, email, token, projectKey, statusColumns, timeline } = body;
+  const { siteUrl, email, token, projectKey, statusColumns, timeline, customFrom, customTo } = body;
 
   if (!siteUrl || !email || !token || !projectKey || !statusColumns?.length) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -36,16 +42,15 @@ export async function POST(req: NextRequest) {
   const auth = Buffer.from(`${email}:${token}`).toString('base64');
   const headers = { Authorization: `Basic ${auth}`, Accept: 'application/json', 'Content-Type': 'application/json' };
 
-  const { from, label } = getDateRange(timeline || 'today');
+  const { from, to, label } = getDateRange(timeline || 'today', customFrom, customTo);
 
   // Build JQL: tickets I moved to any of the selected statuses on or after the start date
   const statusChangedClauses = statusColumns.map((s: string) =>
-    `status changed to "${s}" by currentUser() after "${from}"`
+    `status changed to "${s}" by currentUser() during ("${from}", "${to}")`
   ).join(' OR ');
 
   const jql = `project = "${projectKey}" AND (${statusChangedClauses}) ORDER BY updated DESC`;
   console.log('[jira] JQL:', jql);
-
   try {
     const url = `${siteUrl.replace(/\/$/, '')}/rest/api/3/search/jql`;
     const res = await fetch(url, {

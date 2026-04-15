@@ -126,9 +126,9 @@ export function buildSlackMessage(
     msg += '\n';
   });
 
-  if (totalSeconds > 0) {
-    msg += `⏱ *Total logged: ${formatTime(totalSeconds)}*`;
-  }
+  // if (totalSeconds > 0) {
+  //   msg += `⏱ *Total logged: ${formatTime(totalSeconds)}*`;
+  // }
 
   return msg.trim();
 }

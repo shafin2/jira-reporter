@@ -13,10 +13,13 @@ const TIMELINE_OPTIONS = [
   { value: '2days', label: 'Last 2 days' },
   { value: '3days', label: 'Last 3 days' },
   { value: 'week', label: 'This week' },
+  { value: 'custom', label: 'Custom' },
 ];
 
 export default function SummaryPanel({ settings }: Props) {
   const [timeline, setTimeline] = useState('today');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
@@ -44,6 +47,12 @@ export default function SummaryPanel({ settings }: Props) {
     setSlackSent(false);
 
     try {
+      if (timeline === 'custom' && (!customFrom || !customTo)) {
+        setError('Select both a start and end date for custom range.');
+        setLoading(false);
+        return;
+      }
+
       const res = await fetch('/api/jira', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -54,6 +63,8 @@ export default function SummaryPanel({ settings }: Props) {
           projectKey: settings.selectedProjectKey,
           statusColumns: settings.statusColumns.map(c => c.name),
           timeline,
+          customFrom,
+          customTo,
         }),
       });
 
@@ -63,12 +74,21 @@ export default function SummaryPanel({ settings }: Props) {
       const tickets: JiraTicket[] = data.tickets;
       setTimelineLabel(data.timelineLabel);
 
-      // Group by status column order
+      // Group tickets by their current status.
+      // Tickets are history-based so they may now be in any status — group by current status,
+      // using configured columns first, then any remaining tickets under their actual status.
+      const configuredNames = settings.statusColumns.map(c => c.name.toUpperCase());
       const grouped: SummaryGroup[] = settings.statusColumns.map(col => ({
         status: col.name,
         emoji: col.emoji,
         tickets: tickets.filter(t => t.status.toUpperCase() === col.name.toUpperCase()),
       }));
+      // Add an "Other" group for tickets that have moved beyond the tracked columns
+      const accounted = new Set(grouped.flatMap(g => g.tickets.map(t => t.key)));
+      const others = tickets.filter(t => !accounted.has(t.key));
+      if (others.length > 0) {
+        grouped.push({ status: 'Moved forward', emoji: '➡️', tickets: others });
+      }
 
       const total = tickets.reduce((a, t) => a + (t.timespent || 0), 0);
       setGroups(grouped);
@@ -125,7 +145,7 @@ export default function SummaryPanel({ settings }: Props) {
         <div className="section-label">Generate summary</div>
 
         <label className="field-label">Timeline</label>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: timeline === 'custom' ? 10 : 16, flexWrap: 'wrap' }}>
           {TIMELINE_OPTIONS.map(opt => (
             <button key={opt.value}
               onClick={() => setTimeline(opt.value)}
@@ -141,6 +161,21 @@ export default function SummaryPanel({ settings }: Props) {
             </button>
           ))}
         </div>
+
+        {timeline === 'custom' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+            <div>
+              <label className="field-label">From</label>
+              <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+                style={{ marginBottom: 0 }} />
+            </div>
+            <div>
+              <label className="field-label">To</label>
+              <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+                style={{ marginBottom: 0 }} />
+            </div>
+          </div>
+        )}
 
         {settings.selectedProjectKey && (
           <div style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'IBM Plex Mono, monospace', marginBottom: 14 }}>

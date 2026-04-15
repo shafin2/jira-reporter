@@ -16,6 +16,9 @@ export default function SettingsPanel({ settings, onChange }: Props) {
   const [newColName, setNewColName] = useState('');
   const [newColEmoji, setNewColEmoji] = useState('✅');
   const [saved, setSaved] = useState(false);
+  const [loadingStatuses, setLoadingStatuses] = useState(false);
+  const [availableStatuses, setAvailableStatuses] = useState<string[]>([]);
+  const [statusError, setStatusError] = useState('');
 
   function update(patch: Partial<AppSettings>) {
     const next = { ...settings, ...patch };
@@ -57,6 +60,38 @@ export default function SettingsPanel({ settings, onChange }: Props) {
   function selectBoard(boardId: number) {
     const board = settings.boards.find(b => b.id === boardId);
     update({ selectedBoardId: boardId, selectedProjectKey: board?.projectKey || '' });
+  }
+
+  async function fetchStatuses() {
+    const { siteUrl, email, token } = settings.jira;
+    const projectKey = settings.selectedProjectKey;
+    if (!siteUrl || !email || !token || !projectKey) {
+      setStatusError('Select a board first.');
+      return;
+    }
+    setLoadingStatuses(true);
+    setStatusError('');
+    try {
+      const params = new URLSearchParams({ siteUrl, email, token, projectKey });
+      const res = await fetch(`/api/statuses?${params}`);
+      const data = await res.json();
+      if (!res.ok) { setStatusError(data.error || 'Failed to fetch statuses'); return; }
+      setAvailableStatuses(data.statuses);
+    } catch (e: any) {
+      setStatusError(e.message);
+    } finally {
+      setLoadingStatuses(false);
+    }
+  }
+
+  function toggleStatus(name: string) {
+    const existing = settings.statusColumns.find(c => c.name === name.toUpperCase());
+    if (existing) {
+      update({ statusColumns: settings.statusColumns.filter(c => c.id !== existing.id) });
+    } else {
+      const col: StatusColumn = { id: Date.now().toString(), name: name.toUpperCase(), emoji: '✅' };
+      update({ statusColumns: [...settings.statusColumns, col] });
+    }
   }
 
   function addColumn() {
@@ -175,14 +210,45 @@ export default function SettingsPanel({ settings, onChange }: Props) {
       <div className="card">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
           <div className="section-label" style={{ margin: 0 }}>Status columns to track</div>
-          <Link href="/guide#columns" target="_blank" style={{ fontSize: 11, color: 'var(--muted)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <HelpCircle size={13} /> help
-          </Link>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button className="btn" onClick={fetchStatuses} disabled={loadingStatuses}
+              style={{ padding: '5px 12px', fontSize: 12 }}>
+              <RefreshCw size={12} style={{ animation: loadingStatuses ? 'spin 1s linear infinite' : 'none' }} />
+              {loadingStatuses ? 'loading...' : 'fetch statuses'}
+            </button>
+            <Link href="/guide#columns" target="_blank" style={{ fontSize: 11, color: 'var(--muted)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <HelpCircle size={13} /> help
+            </Link>
+          </div>
         </div>
 
-        <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12, fontFamily: 'IBM Plex Mono, monospace', lineHeight: 1.6 }}>
-          Add the exact column names from your Jira board. Each will appear as a section in your summary.
-        </p>
+        {statusError && <div className="status-banner status-error" style={{ marginBottom: 10 }}>{statusError}</div>}
+
+        {availableStatuses.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'IBM Plex Mono, monospace', marginBottom: 8 }}>
+              Click to toggle — selected statuses appear in your summary
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {availableStatuses.map(name => {
+                const active = settings.statusColumns.some(c => c.name === name.toUpperCase());
+                return (
+                  <button key={name} onClick={() => toggleStatus(name)}
+                    style={{
+                      padding: '5px 10px', fontSize: 12, borderRadius: 6, cursor: 'pointer',
+                      border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                      background: active ? 'rgba(124,106,247,0.12)' : 'var(--surface2)',
+                      color: active ? 'var(--accent)' : 'var(--muted)',
+                      fontFamily: 'IBM Plex Mono, monospace',
+                      transition: 'all 0.15s',
+                    }}>
+                    {active ? '✓ ' : ''}{name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
           {settings.statusColumns.map(col => (
